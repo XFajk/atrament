@@ -13,10 +13,23 @@ from atrament.sections.settings import SettingsSection
 MAX_HISTORY: int = 3
 
 
-def change_section(section_path: str) -> None:
+def change_section(section_path: str, outside_routing: bool = False) -> None:
+    """
+    Params:
+        section_path: str - The path of the section to change to.
+        outside_routing: bool - Whether the change is being made outside of the routing system.
+            Aka whenever this function is called outside of page.on_route_change callback this needs to be set to True
+    """
     page_ref: ft.Page = get_page_ref()
 
     troute = ft.TemplateRoute(section_path)
+    if page_ref.views[-1].route is not None:
+        if troute.match(page_ref.views[-1].route) and not outside_routing:
+            while len(page_ref.views) > MAX_HISTORY:
+                page_ref.views.pop(0)
+
+            page_ref.update()
+            return
 
     if troute.match(HomeSection.route()):
         page_ref.views.append(HomeSection().render())
@@ -64,7 +77,7 @@ def main(page: ft.Page):
         change_section(e.route)
 
     page.on_route_change = route_change
-    change_section(page.route)
+    change_section(page.route, True)
 
 
 def run():

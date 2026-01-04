@@ -1,6 +1,8 @@
 import json
+from typing import Any
 
 import flet as ft
+import keyring
 
 from atrament.const import (
     DEFAULT_SETTINGS,
@@ -11,11 +13,15 @@ from atrament.page_ref import get_page_ref
 from atrament.sections.section import Section
 
 
+def is_secret(key: str) -> bool:
+    return "key" in key.lower() or "password" in key.lower()
+
+
 class SettingsSection(Section):
     _route = "/settings/"
 
     def __init__(self):
-        self.inputs = {}
+        self.inputs: dict[str, dict[str, Any]] = {}
         self.save_button: ft.Button | None = None
 
     @staticmethod
@@ -34,7 +40,15 @@ class SettingsSection(Section):
                 # Convert empty strings back to None if that matches the default type
                 if not value:
                     value = None
-                new_settings[section][key] = value
+
+                # special handling of secret data
+                if is_secret(key):
+                    keyring.set_password(
+                        "atrament", f"{section}:{key}", value or ""
+                    )
+                    new_settings[section][key] = None
+                else:
+                    new_settings[section][key] = value
 
         # Ensure directory exists
         USER_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -64,6 +78,7 @@ class SettingsSection(Section):
             top_view = page.views[-1]
             await page.push_route(top_view.route or "/")
         else:
+            page.views.pop()
             await page.push_route("/")
 
     def render(self):
@@ -118,12 +133,16 @@ class SettingsSection(Section):
             if isinstance(default_section_values, dict):
                 for key, default_val in default_section_values.items():
                     # Determine value: user value > default value
-                    current_val = user_section_values.get(key, default_val)
+                    # handle secret values
+                    if is_secret(key):
+                        current_val = keyring.get_password(
+                            "atrament", f"{section_name}:{key}"
+                        )
+                    else:
+                        current_val = user_section_values.get(key, default_val)
 
                     # Determine if it looks like a password/key for masking
-                    is_password = (
-                        "key" in key.lower() or "password" in key.lower()
-                    )
+                    is_password = is_secret(key)  # cache the value
 
                     tf = ft.TextField(
                         label=key,

@@ -101,10 +101,10 @@ class ProjectEntry(ft.Button):
             metadata_file = project_dir / "atrament.json"
             if metadata_file.exists():
                 with open(metadata_file, "r", encoding="utf-8") as f:
-                    metadata = json.load(f)
-                metadata["name"] = new_name
+                    project_data = json.load(f)
+                project_data["metadata"]["name"] = new_name
                 with open(metadata_file, "w", encoding="utf-8") as f:
-                    json.dump(metadata, f, indent=4)
+                    json.dump(project_data, f, indent=4)
 
             # Update UI
             self.project_name = (
@@ -221,4 +221,5 @@ class PreviouseProjectList(ft.Column):
 
     def init(self):
         self.width = 300
+        # TODO: MAKE THIS A ListView
         self.controls = self.get_previouse_projects()

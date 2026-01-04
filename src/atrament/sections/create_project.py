@@ -1,6 +1,7 @@
 import datetime
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 import flet as ft
 
@@ -44,13 +45,22 @@ class CreateProjectSection(Section):
         project_dir = Path(self.path_to_project)
         project_dir.mkdir(parents=True, exist_ok=True)
 
-        metadata = {
-            "name": name,
-            "description": self.description_field.value,
+        project_data = {
+            "metadata": {
+                "name": name,
+                "description": self.description_field.value,
+            },
+            "workdata": {
+                "ai-configuration": {
+                    "prompt": "",
+                    "model": None,
+                },
+                "files": {"target-files": [], "source-files": []},
+            },
         }
 
         with open(project_dir / "atrament.json", "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=4)
+            json.dump(project_data, f, indent=4)
 
         today = datetime.date.today().strftime("%Y-%m-%d")
 
@@ -64,7 +74,9 @@ class CreateProjectSection(Section):
             with open(PROJECT_TRACKER_FILE, "a", encoding="utf-8") as f:
                 f.write(entry)
 
-        await get_page_ref().push_route("/project/:encoded_path")
+        await get_page_ref().push_route(
+            f"/project/{quote(self.path_to_project, safe='')}"
+        )
 
     async def cancel(self, _):
         page = get_page_ref()
