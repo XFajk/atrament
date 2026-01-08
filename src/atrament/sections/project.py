@@ -105,6 +105,7 @@ class ProjectConfiguration(ft.Column):
             max_lines=5,
             border_color=ft.Colors.BLUE_200,
             width=550,
+            height=100,
             on_change=self.on_prompt_change,
         )
 
@@ -590,7 +591,122 @@ class ProjectSection(Section):
         e.control.bgcolor = ft.Colors.BLUE
         e.control.update()
 
+        # Enable rollback button after processing
+        self.rollback_button.disabled = False
+        self.rollback_button.bgcolor = ft.Colors.RED
+        self.rollback_button.update()
+
+    def is_there_available_backup(self) -> bool:
+        backup_dir_path = USER_DATA_PATH / "projects" / self.project_name
+
+        # Check if backup directory exists and has files
+        if not backup_dir_path.exists():
+            return False
+
+        # Check if there are any backup files
+        return any(backup_dir_path.iterdir())
+
+    async def rollback_files(self, e):
+        async def perform_rollback(_):
+            get_page_ref().pop_dialog()
+
+            backup_dir_path = USER_DATA_PATH / "projects" / self.project_name
+
+            # Restore each file from backup
+            for backup_file_path in backup_dir_path.rglob("*"):
+                if backup_file_path.is_file():
+                    relative_path = backup_file_path.relative_to(
+                        backup_dir_path
+                    )
+                    original_file_path = self.path_to_project / relative_path
+
+                    # Read backup content
+                    async with aiofiles.open(backup_file_path, "r") as f:
+                        content = await f.read()
+
+                    # Write to original location
+                    async with aiofiles.open(original_file_path, "w") as f:
+                        await f.write(content)
+
+            # Delete backup directory after successful rollback
+            import shutil
+
+            shutil.rmtree(backup_dir_path)
+
+            # Disable rollback button
+            self.rollback_button.disabled = True
+            self.rollback_button.bgcolor = ft.Colors.with_opacity(
+                0.5, ft.Colors.RED
+            )
+            self.rollback_button.update()
+
+            # Show success message
+            get_page_ref().show_dialog(
+                ft.AlertDialog(
+                    title="Rollback Complete",
+                    content=ft.Text(
+                        "Files have been successfully restored to their previous state."
+                    ),
+                    actions=[
+                        ft.TextButton(
+                            "OK",
+                            on_click=lambda _: get_page_ref().pop_dialog(),
+                        )
+                    ],
+                )
+            )
+
+        async def cancel_rollback(_):
+            get_page_ref().pop_dialog()
+
+        # Show confirmation dialog with options
+        get_page_ref().show_dialog(
+            ft.AlertDialog(
+                title="Confirm Rollback",
+                content=ft.Text(
+                    "Are you sure you want to rollback all files to their previous state? "
+                    "This will undo all changes made during the last processing."
+                ),
+                actions=[
+                    ft.TextButton(
+                        "See Change Report",
+                        on_click=self.see_change_report,
+                    ),
+                    ft.TextButton(
+                        "Rollback",
+                        on_click=perform_rollback,
+                    ),
+                    ft.TextButton(
+                        "Cancel",
+                        on_click=cancel_rollback,
+                    ),
+                ],
+            )
+        )
+
     def render(self):
+        self.process_button = ft.Button(
+            "Process Files",
+            icon=ft.Icons.PLAY_ARROW,
+            bgcolor=ft.Colors.BLUE,
+            color=ft.Colors.WHITE,
+            height=50,
+            on_click=self.process_files,
+        )
+
+        has_backup = self.is_there_available_backup()
+        self.rollback_button = ft.Button(
+            "Rollback",
+            icon=ft.Icons.BACKUP,
+            bgcolor=ft.Colors.RED
+            if has_backup
+            else ft.Colors.with_opacity(0.5, ft.Colors.RED),
+            color=ft.Colors.WHITE,
+            height=50,
+            on_click=self.rollback_files,
+            disabled=not has_backup,
+        )
+
         return ft.View(
             route=self._route,
             controls=[
@@ -604,17 +720,23 @@ class ProjectSection(Section):
                             ft.Row(
                                 [
                                     self.config,
-                                    ft.Container(
-                                        content=ft.Button(
-                                            "Process Files",
-                                            icon=ft.Icons.PLAY_ARROW,
-                                            bgcolor=ft.Colors.BLUE,
-                                            color=ft.Colors.WHITE,
-                                            height=50,
-                                            on_click=self.process_files,
-                                        ),
-                                        padding=ft.Padding.only(left=20),
-                                        alignment=ft.Alignment.CENTER,
+                                    ft.Column(
+                                        [
+                                            ft.Container(
+                                                content=self.rollback_button,
+                                                padding=ft.Padding.only(
+                                                    left=20
+                                                ),
+                                                alignment=ft.Alignment.CENTER,
+                                            ),
+                                            ft.Container(
+                                                content=self.process_button,
+                                                padding=ft.Padding.only(
+                                                    left=20
+                                                ),
+                                                alignment=ft.Alignment.CENTER,
+                                            ),
+                                        ]
                                     ),
                                 ],
                                 vertical_alignment=ft.CrossAxisAlignment.END,
