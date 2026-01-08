@@ -212,14 +212,32 @@ class PreviouseProjectList(ft.Column):
     def refresh_list(self):
         """Refresh the list by reloading projects from the tracker file."""
         self.controls.clear()
-        self.controls = self.get_previouse_projects()
+        self.controls = [
+            ft.ListView(
+                controls=self.get_previouse_projects(),
+                spacing=10,
+                height=self.height,
+            )
+        ]
 
     def before_update(self):
         """Check if the project list has changed and refresh if needed."""
         self.controls.clear()
-        self.controls = self.get_previouse_projects()
+        self.controls = [
+            ft.ListView(
+                controls=self.get_previouse_projects(),
+                spacing=10,
+                height=self.height,
+            )
+        ]
 
     def init(self):
         self.width = 300
-        # TODO: MAKE THIS A ListView
-        self.controls = self.get_previouse_projects()
+        self.height = get_page_ref().window.height
+        self.controls = [
+            ft.ListView(
+                controls=self.get_previouse_projects(),
+                spacing=10,
+                height=self.height,
+            )
+        ]

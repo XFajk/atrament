@@ -1,11 +1,16 @@
 import asyncio
+import difflib
 import json
+import os
+import webbrowser
 from enum import Enum
 from pathlib import Path
 
+import aiofiles
 import flet as ft
 
 from atrament import ai
+from atrament.const import USER_DATA_PATH
 from atrament.page_ref import get_page_ref
 from atrament.sections.section import Section
 
@@ -126,7 +131,9 @@ class ProjectConfiguration(ft.Column):
             options = list(
                 map(
                     lambda x: ft.DropdownOption(
-                        x[1], leading_icon=x[0].to_icon()
+                        f"{x[0].value}:{x[1]}",
+                        leading_icon=x[0].to_icon(),
+                        text=x[1],
                     ),
                     models,
                 )
@@ -214,8 +221,11 @@ class FileList(ft.Column):
         )
 
         for f in result:
-            # Check if file is under project path
             if f.path is None:
+                continue
+
+            # check if file is atrament.json we dont want to modify our own project files
+            if f.name == "atrament.json":
                 continue
 
             # Check if file is under project path we dont want random files
@@ -251,11 +261,13 @@ class FileList(ft.Column):
             if search_filter and search_filter not in Path(p).name.lower():
                 continue
 
+            file_name = Path(p).name
+            if len(file_name) > 25:
+                file_name = file_name[:22] + "..."
+
             row = ft.Row(
                 controls=[
-                    ft.Text(
-                        Path(p).name, size=16, margin=ft.Margin.only(left=10)
-                    ),
+                    ft.Text(file_name, size=16, margin=ft.Margin.only(left=10)),
                     ft.IconButton(
                         ft.Icons.DELETE,
                         icon_color=ft.Colors.RED,
@@ -326,15 +338,251 @@ class ProjectSection(Section):
     def route() -> str:
         return ProjectSection._route
 
+    async def load_files_content(self, file_paths: list[str]) -> dict[str, str]:
+        result = {}
+
+        for p in file_paths:
+            async with aiofiles.open(p, mode="r") as f:
+                content = await f.read()
+                result[p] = content
+
+        return result
+
+    async def backup_files(self, files: dict[str, str]) -> None:
+        backup_dir_path = USER_DATA_PATH / "projects" / self.project_name
+
+        # Clear the backup directory if it exists
+        if backup_dir_path.exists():
+            import shutil
+
+            shutil.rmtree(backup_dir_path)
+        backup_dir_path.mkdir(parents=True, exist_ok=True)
+
+        async def backup_file(p: str, content: str) -> None:
+            relative_file_path = Path(p).relative_to(self.path_to_project)
+            backup_file_path = backup_dir_path / relative_file_path
+
+            backup_file_path.parent.mkdir(parents=True, exist_ok=True)
+            async with aiofiles.open(backup_file_path, mode="w") as f:
+                await f.write(content)
+
+        tasks = [backup_file(p, content) for p, content in files.items()]
+        await asyncio.gather(*tasks)
+
+    async def prompt_ai(
+        self, target_files: dict[str, str], source_files: dict[str, str]
+    ) -> str:
+        prompt = f"""You are an AI assistant that modifies files based on user instructions.
+
+        INPUT STRUCTURE:
+        - target_files: Files to be edited (provided as JSON)
+        - source_files: Reference files that may contain relevant information (provided as JSON)
+        - user_instructions: Specific editing instructions to apply
+
+        USER INSTRUCTIONS:
+        {self.config.instruction_field.value}
+
+        TARGET FILES:
+        {json.dumps(target_files, indent=2)}
+
+        SOURCE FILES:
+        {json.dumps(source_files, indent=2)}
+
+        OUTPUT REQUIREMENTS:
+        Return ONLY a valid JSON object with the same structure as target_files, containing the updated file contents.
+        - Use proper JSON formatting with correctly escaped newlines (use \\n for line breaks, not literal backslash-n)
+        - When the JSON is parsed by Python's json.loads(), the \\n sequences should become actual newline characters
+        - Do not double-escape newlines (do not use \\\\n)
+        - Do not include any explanations, greetings, or additional text outside the JSON
+        - The response must be valid JSON that can be parsed directly
+
+        Example: {{"file.txt": "first line\\nsecond line\\nthird line"}} will correctly produce newlines when parsed."""
+
+        model_selection = (
+            self.config.model_dropdown.value
+        )  # format of this is "{AiCompany.value}:{model}"
+        if model_selection is None:
+            self.config.model_dropdown.error_text = "You need to select a model"
+            raise ValueError("You need to select a model")
+
+        company, model = model_selection.split(":")
+        company = ai.AiCompany(int(company))
+
+        try:
+            return await ai.client.prompt(company, prompt, model)
+        except Exception as e:
+            raise e
+
+    async def apply_response(self, response: str) -> None:
+        output_files = json.loads(response)
+
+        async def save_file(file_path: str, contents: str) -> None:
+            async with aiofiles.open(file_path, "w") as file:
+                await file.write(contents)
+
+        tasks = [
+            save_file(file_path, content)
+            for file_path, content in output_files.items()
+        ]
+        await asyncio.gather(*tasks)
+
+    async def see_change_report(self, _) -> None:
+        backup_dir_path = USER_DATA_PATH / "projects" / self.project_name
+        report_dir = USER_DATA_PATH / "reports" / self.project_name
+
+        # Create reports directory
+        os.makedirs(report_dir, exist_ok=True)
+
+        new_file_paths = self.target_files.files
+        backup_file_paths = list(
+            map(
+                lambda x: str(
+                    backup_dir_path / Path(x).relative_to(self.path_to_project)
+                ),
+                self.target_files.files,
+            )
+        )
+
+        # Generate diff reports
+        differ = difflib.HtmlDiff()
+        diff_files = []
+
+        for idx, (new_file_path, old_file_path) in enumerate(
+            zip(new_file_paths, backup_file_paths)
+        ):
+            # Read file contents
+            try:
+                async with aiofiles.open(
+                    old_file_path, "r", encoding="utf-8"
+                ) as f:
+                    old_lines = await f.readlines()
+            except Exception:
+                old_lines = ["(File did not exist in backup)\n"]
+
+            try:
+                async with aiofiles.open(
+                    new_file_path, "r", encoding="utf-8"
+                ) as f:
+                    new_lines = await f.readlines()
+            except Exception:
+                new_lines = ["(File does not exist)\n"]
+
+            # Generate diff HTML
+            diff_html = differ.make_file(
+                old_lines,
+                new_lines,
+                fromdesc=f"Old: {Path(new_file_path).name}",
+                todesc=f"New: {Path(new_file_path).name}",
+                context=True,
+                numlines=3,
+            )
+
+            # Save individual diff file
+            diff_filename = f"diff_{idx}_{Path(new_file_path).stem}.html"
+            diff_path = report_dir / diff_filename
+
+            with open(diff_path, "w", encoding="utf-8") as f:
+                f.write(diff_html)
+
+            diff_files.append((Path(new_file_path).name, diff_filename))
+
+        # Generate index page
+        index_html = [
+            "<!DOCTYPE html>",
+            "<html><head>",
+            '<meta charset="utf-8">',
+            f"<title>Diff Report - {self.project_name}</title>",
+            "<style>",
+            'body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; max-width: 900px; margin: 50px auto; padding: 20px; background: #f5f5f5; }',
+            "h1 { color: #333; border-bottom: 3px solid #0066cc; padding-bottom: 10px; }",
+            ".info { background: white; padding: 15px; border-radius: 5px; margin: 20px 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }",
+            "ul { list-style: none; padding: 0; }",
+            "li { margin: 10px 0; background: white; padding: 15px; border-radius: 5px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); transition: transform 0.2s; }",
+            "li:hover { transform: translateX(5px); }",
+            "a { text-decoration: none; color: #0066cc; font-size: 1.1em; font-weight: 500; }",
+            "a:hover { text-decoration: underline; }",
+            ".count { color: #666; font-size: 0.9em; margin-top: 10px; }",
+            "</style>",
+            "</head><body>",
+            f"<h1>File Comparison Report: {self.project_name}</h1>",
+            f'<div class="info"><strong>Total files compared:</strong> {len(diff_files)}</div>',
+            "<ul>",
+        ]
+
+        for file_name, diff_file in diff_files:
+            index_html.append(
+                f'<li><a href="{diff_file}">📄 {file_name}</a></li>'
+            )
+
+        index_html.extend(["</ul>", "</body></html>"])
+
+        # Write index file
+        index_path = report_dir / "index.html"
+        with open(index_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(index_html))
+
+        # Open in browser
+        webbrowser.open(f"file://{os.path.abspath(index_path)}")
+
     async def process_files(self, e):
         # Placeholder logic
         e.control.content = "Processing..."
         e.control.bgcolor = ft.Colors.ORANGE
         e.control.update()
 
+        # ----- FUNCTION LIST ----- #
+        # load content's of target and source files
+        # make a backup at a specific location
+        # make a prompt to LLM with our request
+        # parse a response for new file content's
+        # push a popup that transition's the user to a window where they can view the changes
+
+        target_files = await self.load_files_content(self.target_files.files)
+        source_files = await self.load_files_content(self.source_files.files)
+
+        await self.backup_files(target_files)
+
+        try:
+            response = await self.prompt_ai(target_files, source_files)
+        except Exception as e:
+            get_page_ref().show_dialog(
+                ft.AlertDialog(
+                    title="Fetching Response problem",
+                    content=ft.Text(f"error: {e}"),
+                    actions=[
+                        ft.TextButton(
+                            "Dismiss",
+                            on_click=lambda _: get_page_ref().pop_dialog(),
+                        )
+                    ],
+                )
+            )
+
+            return
+
+        await self.apply_response(response)
+
         e.control.content = "Done!"
         e.control.bgcolor = ft.Colors.GREEN
         e.control.update()
+
+        get_page_ref().show_dialog(
+            ft.AlertDialog(
+                title="Job done",
+                content=ft.Text(
+                    "The task is done you can check the change report."
+                ),
+                actions=[
+                    ft.TextButton(
+                        "Check Report", on_click=self.see_change_report
+                    ),
+                    ft.TextButton(
+                        "Dismiss",
+                        on_click=lambda _: get_page_ref().pop_dialog(),
+                    ),
+                ],
+            )
+        )
 
         await asyncio.sleep(0.5)
 

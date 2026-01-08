@@ -1,8 +1,12 @@
+import datetime
+import json
 from pathlib import Path
 from urllib.parse import quote
 
+import aiofiles
 import flet as ft
 
+from atrament.const import PROJECT_TRACKER_FILE, PROJECT_TRACKER_LOCK
 from atrament.page_ref import get_page_ref
 
 
@@ -23,7 +27,44 @@ async def create_project(_) -> None:
 
 
 async def open_project() -> None:
-    raise NotImplementedError
+    atrament_file = (
+        await ft.FilePicker().pick_files(
+            dialog_title="Find atrament project file",
+            initial_directory=str(Path.home()),
+            file_type=ft.FilePickerFileType.CUSTOM,
+            allowed_extensions=["json"],
+            allow_multiple=False,
+        )
+    )[0]
+
+    if atrament_file.path is None:
+        return
+
+    project_path = Path(atrament_file.path).parent
+
+    # check if it is a valid atrament.json
+    if not Path(atrament_file.path).name == "atrament.json":
+        return
+
+    with open(atrament_file.path, "r") as f:
+        project_data = json.load(f)
+        safe_name = project_data["metadata"]["name"]
+
+    today = datetime.date.today().strftime("%Y-%m-%d")
+
+    entry = f"{safe_name}, {today}, {project_path}\n"
+    # Ensure parent dir exists
+    PROJECT_TRACKER_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    with PROJECT_TRACKER_LOCK:
+        async with aiofiles.open(
+            PROJECT_TRACKER_FILE, "a", encoding="utf-8"
+        ) as f:
+            await f.write(entry)
+
+    await get_page_ref().push_route(
+        f"/project/{quote(str(project_path), safe='')}"
+    )
 
 
 async def settings() -> None:

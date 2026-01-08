@@ -1,5 +1,6 @@
 from enum import Enum
 from sys import stderr
+from typing import Union
 
 import flet as ft
 import keyring
@@ -47,9 +48,11 @@ SUPPORTED_COMPANIES = {
 
 class AiClinet:
     def __init__(self):
-        self._client_store: dict[AiCompany, object] = {}
+        self._client_store: dict = {}
 
-    def get_client(self, company: AiCompany) -> object | None:
+    def get_client(
+        self, company: AiCompany
+    ) -> Union[AsyncOpenAI, AsyncAnthropic]:
         """
         MAINTENECE WARING: This function work's on the fact,
             that the API key's are stored behind a very specific name.
@@ -63,7 +66,9 @@ class AiClinet:
             case AiCompany.OpenAI:
                 api_key = keyring.get_password("atrament", "ChatGPT:api-key")
                 if api_key is None or api_key == "":
-                    return None
+                    raise ValueError(
+                        "API key is missing from the keyring storage"
+                    )
                 client = self._client_store.get(
                     company,
                     AsyncOpenAI(api_key=api_key),
@@ -71,18 +76,53 @@ class AiClinet:
             case AiCompany.Anthropic:
                 api_key = keyring.get_password("atrament", "Claude:api-key")
                 if api_key is None or api_key == "":
-                    return None
+                    raise ValueError(
+                        "API key is missing from the keyring storage"
+                    )
                 client = self._client_store.get(
                     company,
                     AsyncAnthropic(api_key=api_key),
                 )
             case _:
-                print(
+                raise NotImplementedError(
                     "ai.py::AiClient.get_client(): Currently unimplemented AI soruce",
-                    file=stderr,
                 )
 
         return client
+
+    async def prompt(self, company: AiCompany, prompt: str, model: str) -> str:
+        try:
+            client = self.get_client(company)
+        except Exception as e:
+            raise e
+
+        match company:
+            case AiCompany.OpenAI:
+                if not isinstance(client, AsyncOpenAI):
+                    raise ValueError(
+                        "Invalid client type for the selected company"
+                    )
+
+                params = {
+                    "model": model,
+                    "input": prompt,
+                    "tools": [{"type": "web_search"}],
+                }
+
+                return (await client.responses.create(**params)).output_text
+
+            case AiCompany.Anthropic:
+                if not isinstance(client, AsyncAnthropic):
+                    raise ValueError(
+                        "Invalid client type for the selected company"
+                    )
+
+                raise NotImplementedError("Anthropic AI is not implemented")
+
+            case _:
+                raise NotImplementedError(
+                    "ai.py::AiClient.prompt(): Currently unimplemented AI soruce",
+                )
 
 
 client = AiClinet()

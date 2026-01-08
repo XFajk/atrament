@@ -68,6 +68,8 @@ def setup_user() -> None:
 def main(page: ft.Page):
     setup_user()
     set_page_ref(page)
+    page.window.height = 628.0
+    page.window.width = 800.0
 
     page.title = "Atrament"
 
