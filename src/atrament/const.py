@@ -23,6 +23,5 @@ USER_SETTINGS_LOCK = FileLock(
 DEFAULT_SETTINGS = {
     "ChatGPT": {
         "api-key": None,
-    },
-    "Claude": {"api-key": None},
+    }
 }

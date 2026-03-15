@@ -216,7 +216,7 @@ class PreviouseProjectList(ft.Column):
             ft.ListView(
                 controls=self.get_previouse_projects(),
                 spacing=10,
-                height=self.height,
+                expand=True,
             )
         ]
 
@@ -227,17 +227,16 @@ class PreviouseProjectList(ft.Column):
             ft.ListView(
                 controls=self.get_previouse_projects(),
                 spacing=10,
-                height=self.height,
+                expand=True,
             )
         ]
 
     def init(self):
-        self.width = 300
-        self.height = get_page_ref().window.height
+        self.expand = True
         self.controls = [
             ft.ListView(
                 controls=self.get_previouse_projects(),
                 spacing=10,
-                height=self.height,
+                expand=True,
             )
         ]

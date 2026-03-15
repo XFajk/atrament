@@ -310,7 +310,6 @@ class ProjectSection(Section):
                         self.project_name = data["metadata"]["name"]
         except Exception:
             pass
-
         # Components
         self.header = ProjectHeader(
             self.path_to_project,

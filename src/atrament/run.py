@@ -68,12 +68,15 @@ def setup_user() -> None:
 def main(page: ft.Page):
     setup_user()
     set_page_ref(page)
-    page.window.height = 628.0
-    page.window.width = 800.0
+    
+    page.window.min_height = 700
+    page.window.min_width = 1000
+    page.window.width = page.window.min_width
+    page.window.height = page.window.min_height 
 
     page.title = "Atrament"
 
-    page.window.resizable = False
+    page.window.resizable = True
 
     def route_change(e: ft.RouteChangeEvent) -> None:
         change_section(e.route)

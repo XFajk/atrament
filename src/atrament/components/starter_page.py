@@ -9,6 +9,9 @@ import flet as ft
 from atrament.const import PROJECT_TRACKER_FILE, PROJECT_TRACKER_LOCK
 from atrament.page_ref import get_page_ref
 
+# Minimum width before hiding descriptions
+MIN_WIDTH_FOR_DESCRIPTIONS = 650
+
 
 def get_version() -> str:
     return "0.1.0"
@@ -91,11 +94,17 @@ class StarterPageAction(ft.Row):
         super().__init__(**kwargs)
 
     def init(self):
-        self.height = 30
         self.align = ft.Alignment.CENTER
-        self.width = 500
         self.alignment = ft.MainAxisAlignment.SPACE_BETWEEN
         self.margin = ft.Margin.all(10)
+
+        # Description text that hides on small windows
+        self.description_text = ft.Text(
+            self.quick_description,
+            size=10,
+            color=ft.Colors.GREY_100,
+            visible=True,
+        )
 
         self.action_descrition = ft.Column(
             controls=[
@@ -105,12 +114,10 @@ class StarterPageAction(ft.Row):
                     color=ft.Colors.WHITE,
                     weight=ft.FontWeight.BOLD,
                 ),
-                ft.Text(
-                    self.quick_description, size=10, color=ft.Colors.GREY_100
-                ),
+                self.description_text,
             ],
             align=ft.Alignment.CENTER,
-            width=350,
+            expand=True,
         )
 
         self.controls = [
@@ -149,25 +156,30 @@ class StarterPage(ft.Container):
             align=ft.Alignment.CENTER,
         )
 
+        # Create action components
+        self.create_action = StarterPageAction(
+            label="Create Project",
+            quick_description="Create a new Atrament project to fix and improve your documents",
+            button_text="Create",
+            button_action=create_project,
+        )
+
+        self.open_action = StarterPageAction(
+            label="Open Project",
+            quick_description="Open an existing Atrament Project",
+            button_text="Open",
+            button_action=open_project,
+        )
+
         self.content = ft.Column(
             [
                 ft.Column(
                     [self.title, self.version_text],
-                    margin=ft.Margin.only(top=80, bottom=80),
+                    margin=ft.Margin.only(top=40, bottom=40),
                 ),
-                StarterPageAction(
-                    label="Create Project",
-                    quick_description="Create a new Atrament project to fix and improve your documents",
-                    button_text="Create",
-                    button_action=create_project,
-                ),
+                self.create_action,
                 ft.Divider(),
-                StarterPageAction(
-                    label="Open Project",
-                    quick_description="Open an existing Atrament Project",
-                    button_text="Open",
-                    button_action=open_project,
-                ),
+                self.open_action,
                 ft.Divider(),
                 ft.Container(
                     expand=True,
@@ -176,9 +188,46 @@ class StarterPage(ft.Container):
                         on_click=settings,
                     ),
                     alignment=ft.Alignment.BOTTOM_RIGHT,
-                    padding=ft.Padding.only(
-                        right=10, left=10, top=50, bottom=50
-                    ),
+                    padding=ft.Padding.all(10),
                 ),
-            ]
+            ],
+            expand=True,
+            alignment=ft.MainAxisAlignment.START,
         )
+
+    def did_mount(self):
+        """Called when the control is added to the page."""
+        page_ref = get_page_ref()
+        if page_ref:
+            page_ref.on_resize = self._handle_resize
+            self._handle_resize(None)
+
+    def _handle_resize(self, e):
+        """Hide description text when window is too small."""
+        page_ref = get_page_ref()
+        if page_ref:
+            # Hide description if window width is less than MIN_WIDTH_FOR_DESCRIPTIONS
+            current_width = (
+                page_ref.window.width or 800
+            )  # Default to 800 if None
+            should_show_descriptions = (
+                current_width >= MIN_WIDTH_FOR_DESCRIPTIONS
+            )
+
+            # Update all action descriptions
+            if (
+                hasattr(self, "create_action")
+                and self.create_action.description_text
+            ):
+                self.create_action.description_text.visible = (
+                    should_show_descriptions
+                )
+            if (
+                hasattr(self, "open_action")
+                and self.open_action.description_text
+            ):
+                self.open_action.description_text.visible = (
+                    should_show_descriptions
+                )
+
+            self.update()
